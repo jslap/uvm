@@ -49,7 +49,7 @@ pass=0; fail=0; skip=0
 # than SSA registers) and so hit different uvclang code paths.
 OPT_LEVELS="-O0 -O1 -O2"
 
-for src in "$TESTS"/*.{c,cpp}; do
+for src in "$TESTS"/*.c "$TESTS"/*.cpp; do
     case "$src" in
         *.cpp) base=$(basename "$src" .cpp) ;;
         *)     base=$(basename "$src" .c) ;;
