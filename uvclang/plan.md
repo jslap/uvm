@@ -636,6 +636,13 @@ end-to-end suite is `tests/run_frontend_tests.sh` (102 pass / 0 fail / 0 skip).
       the wider aggregate/struct-by-value ABI it emits) once C is solid. This is
       where the ABI simplifications noted above (structs by pointer, no
       struct-by-value coercion) get revisited.
+    - [x] Support the base C++ language, No library.
+    - [x] Support more than one TU (The goal is to have a disting TU for some runtime code like new.)
+          List function/symbols that are used but not defined while processing IR. For each TU
+          At the end, check that symbols were defined.
+          Test with 2 C files
+    - [x] Support runtime C stdio.
+    - [ ] Add a TU for run-time code with internal new. (could use a .cpp file, or cache the IR result, or cache the parsed uvm), and 'link' c++-new to the internal new 
 
 ### Phase 10 — doom bring-up on a real, graphical UVM runtime
 Merged with the former Phase 11 runtime work: build the real syscall-backed

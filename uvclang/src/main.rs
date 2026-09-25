@@ -8,6 +8,10 @@ mod lexer;
 mod parser;
 mod syscalls;
 
+use itertools::Itertools; 
+use tempfile::Builder;
+
+use std::io::Write;
 use std::process::exit;
 
 use codegen::Codegen;
@@ -22,13 +26,15 @@ const USAGE: &str = "usage: uvclang <input.c|.ll> [-o out.asm] [-O0|-O1|-O2|-O3]
 /// URL for reporting LLVM IR uvclang cannot parse yet.
 const ISSUE_URL: &str = "https://github.com/maximecb/uvm/issues/new";
 
+static STDIO_C_CONTENT: &str = include_str!("../lib_src/stdio.c");
+
 fn main()
 {
     // Args: <input.c|.ll> [-o out.asm] [-O<n>] [-D..] [-I..] [--emit-ir] [--stats]
     // A `.ll` input is parsed directly (the back-end path, unchanged); any other
     // source is first lowered to IR by clang (the Phase 9 front-end).
     let args: Vec<String> = std::env::args().collect();
-    let mut input: Option<String> = None;
+    let mut inputs: Vec<String> = vec![];
     let mut out_path: Option<String> = None;
     let mut stats = false;
     let mut emit_ir = false;
@@ -64,64 +70,132 @@ fn main()
                 exit(2);
             }
             s => {
-                if input.is_none() {
-                    input = Some(s.to_string());
-                }
+                inputs.push(s.to_string());
             }
         }
         i += 1;
     }
 
-    let input = match input {
-        Some(p) => p,
-        None => {
-            eprintln!("{}", USAGE);
-            exit(2);
-        }
+    if inputs.is_empty() {
+        eprintln!("{}", USAGE);
+        exit(2);
     };
 
-    // Front-end: obtain textual LLVM IR either straight from a `.ll` file or by
-    // driving clang on a C/C++ source in-process (no temp `.ll` on disk).
-    let (ir, ir_name) = if frontend::is_ir_path(&input) {
-        match std::fs::read_to_string(&input) {
-            Ok(src) => (src, input.clone()),
-            Err(e) => {
-                eprintln!("could not read input file \"{}\": {}", input, e);
-                exit(1);
+    let irs : Vec<Result<(String, String), String>> = inputs
+    .into_iter()
+    .map(|input| -> Result<(String, String), String> {
+        // Front-end: obtain textual LLVM IR either straight from a `.ll` file or by
+        // driving clang on a C/C++ source in-process (no temp `.ll` on disk).
+        if frontend::is_ir_path(&input) {
+            match std::fs::read_to_string(&input) {
+                Ok(src) => Ok((src, input.clone())),
+                Err(e) => Err(e.to_string())
+            }
+        } else {
+            let mut this_fe = fe.clone();
+            this_fe.is_cpp = frontend::is_cpp_path(&input);
+            match frontend::compile_to_ir(&input, &this_fe) {
+                Ok(ir) => Ok((ir, input.clone())),
+                Err(e) => Err(e)
             }
         }
-    } else {
-        fe.is_cpp = frontend::is_cpp_path(&input);
-        match frontend::compile_to_ir(&input, &fe) {
-            Ok(ir) => (ir, input.clone()),
-            Err(e) => {
-                eprintln!("uvclang: {}", e);
-                exit(1);
-            }
-        }
-    };
+        
+    })
+    .collect();
 
+    let (successes, errors): (Vec<(String, String)>, Vec<String>) = irs.into_iter().partition_result();
+
+    if !errors.is_empty() {
+        eprintln!("parse error: {}", errors.join("\n"));
+        exit(1);
+    }
     // --emit-ir: dump the front-end IR and stop (handy for growing C coverage).
     if emit_ir {
+        if successes.len() != 1 {
+            eprintln!(
+                "uvclang: --emit-ir only supports a single input file (got {}); \
+                 invoke uvclang separately for each file",
+                successes.len()
+            );
+            exit(2);
+        }
+        let (ir, _) = successes.into_iter().next().unwrap();
         emit(&out_path, ir);
         return;
     }
 
-    let module = match parse(&ir, &ir_name) {
-        Ok(m) => m,
+    let modules : Result<Vec<ast::Module>, String> = successes.into_iter()
+        .map(|(ir, ir_name)| {
+            match parse(&ir, &ir_name) {
+                Ok(m) => Ok(m),
+                Err(e) => Err(e.to_string())
+            }
+        })
+        .collect();
+
+    let modules = match modules {
+        Ok(a) => a,
         Err(e) => {
-            eprintln!("parse error: {}", e);
+            eprintln!("module error: {}", e);
             print_unsupported_ir_hint();
             exit(1);
         }
     };
-
+    
     if stats {
-        print_stats(&ir_name, &module);
+        for module in &modules {
+            let path = module.source_filename.as_deref().unwrap_or("unknown module");
+            print_stats(path, module);
+        }
         return;
     }
 
-    let asm = match Codegen::new(&module).generate() {
+    // Compute runtime modules
+    let runtime_srcs_c = vec![
+        ("stdio.c", STDIO_C_CONTENT)
+        ];
+
+    let runtime_ir_c : Vec<(String, String)> = runtime_srcs_c
+        .into_iter()
+        .map(|(file_name, file_content)| -> (String, String) {
+            let mut src_file = Builder::new()
+                .suffix(file_name)
+                .tempfile()
+                .unwrap_or_else(|e| {
+                    eprintln!("failed to create temp file for {}: {}", file_name, e);
+                    exit(1)
+                });
+            if let Err(e) = writeln!(src_file, "{}", file_content) {
+                eprintln!("failed to write temp file for {}: {}", file_name, e);
+                exit(1);
+            }
+
+            let src_path = src_file.path().to_str().expect("temp path is not valid UTF-8");
+            match frontend::compile_to_ir(src_path, &fe) {
+                Ok(ir) => (ir, format!("runtime_{}", file_name)),
+                Err(e) => {
+                    eprintln!("runtime module error: {}", e);
+                    exit(1)
+                }
+            }        
+    })
+    .collect();
+
+    let runtime_modules : Vec<ast::Module> = runtime_ir_c
+        .into_iter()
+        .map(|(ir, ir_name)| {
+            match parse(&ir, &ir_name) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("runtime module error: {}", e);
+                    exit(1)
+                }
+            }
+        })
+        .collect();
+
+    let all_modules: Vec<ast::Module> = modules.into_iter().chain(runtime_modules).collect();
+    let asm = match Codegen::new(&all_modules).and_then(|cg| cg.generate()) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("codegen error: {}", e);

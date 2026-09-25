@@ -59,6 +59,22 @@ pub enum Type
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Linkage
+{
+    Private,
+    Internal,
+    AvailExternally,
+    Linkonce,
+    Weak,
+    Common,
+    Appending,
+    ExternWeak,
+    LinkonceOdr,
+    WeakOdr,
+    External
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructBody
 {
     pub packed: bool,
@@ -141,7 +157,7 @@ pub enum ConstExpr
 // Globals & functions
 // ===========================================================================
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Global
 {
     pub name: String,
@@ -150,6 +166,8 @@ pub struct Global
     pub is_const: bool,
     /// Initializer, or `None` for an external declaration.
     pub init: Option<Value>,
+    ///
+    pub linkage: Linkage,
 }
 
 #[derive(Debug)]
@@ -167,6 +185,7 @@ pub struct Function
     pub ret_ty: Type,
     pub params: Vec<Param>,
     pub varargs: bool,
+    pub linkage: Linkage,
     /// Empty for a `declare` (no body).
     pub blocks: Vec<BasicBlock>,
 }

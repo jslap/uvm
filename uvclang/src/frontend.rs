@@ -13,6 +13,7 @@ use std::path::Path;
 use std::process::Command;
 
 /// Options controlling the clang invocation, gathered from the uvclang CLI.
+#[derive(Clone)]
 pub struct FrontendOpts
 {
     /// Optimization level flag, e.g. `-O2` (the default; overridable on the CLI).

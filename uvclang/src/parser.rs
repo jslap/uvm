@@ -135,6 +135,7 @@ impl Parser
     {
         let name = self.parse_global_name()?;
         self.input.expect_token("=")?;
+        let linkage = self.parse_linkage().unwrap_or(Linkage::External);
         self.skip_attrs()?; // linkage, unnamed_addr, ...
 
         let is_const = if self.input.match_keyword("constant")? {
@@ -157,7 +158,7 @@ impl Parser
 
         // Trailing `, align N`, comdat, metadata attachments, ...
         self.skip_line();
-        Ok(Global { name, ty, is_const, init })
+        Ok(Global { name, ty, is_const, init, linkage })
     }
 
     fn parse_type_def(&mut self) -> Result<(String, Option<StructBody>), ParseError>
@@ -182,6 +183,7 @@ impl Parser
 
     fn parse_define(&mut self) -> Result<Function, ParseError>
     {
+        let linkage = self.parse_linkage().unwrap_or(Linkage::External);
         self.skip_attrs()?; // linkage / visibility (internal, dso_local, ...)
         self.skip_call_cconv()?; // calling convention (fastcc, coldcc, ...)
         self.skip_attrs()?; // return-value attributes (noundef, ...)
@@ -194,11 +196,12 @@ impl Parser
         self.input.expect_token("{")?;
 
         let blocks = self.parse_body()?;
-        Ok(Function { name, ret_ty, params, varargs, blocks })
+        Ok(Function { name, ret_ty, params, varargs, linkage, blocks })
     }
 
     fn parse_declare(&mut self) -> Result<Function, ParseError>
     {
+        let linkage = self.parse_linkage().unwrap_or(Linkage::External);
         self.skip_attrs()?;
         self.skip_call_cconv()?; // calling convention (fastcc, coldcc, ...)
         self.skip_attrs()?;
@@ -208,7 +211,7 @@ impl Parser
         let (params, varargs) = self.parse_param_list()?;
         self.input.expect_token(")")?;
         self.skip_line(); // trailing attributes
-        Ok(Function { name, ret_ty, params, varargs, blocks: vec![] })
+        Ok(Function { name, ret_ty, params, varargs, linkage, blocks: vec![] })
     }
 
     /// Parse a parenthesized parameter list (the opening `(` is already
@@ -327,6 +330,46 @@ impl Parser
         }
 
         Ok(blocks)
+    }
+
+    fn parse_linkage(&mut self) -> Result<Linkage, ParseError>
+    {
+        self.input.eat_ws()?;
+
+        if self.input.match_keyword("private")? {
+            return Ok(Linkage::Private);
+        }
+        if self.input.match_keyword("internal")? {
+            return Ok(Linkage::Internal);
+        }
+        if self.input.match_keyword("available_externally")? {
+            return Ok(Linkage::AvailExternally);
+        }
+        if self.input.match_keyword("linkonce")? {
+            return Ok(Linkage::Linkonce);
+        }
+        if self.input.match_keyword("weak")? {
+            return Ok(Linkage::Weak);
+        }
+        if self.input.match_keyword("common")? {
+            return Ok(Linkage::Common);
+        }
+        if self.input.match_keyword("appending")? {
+            return Ok(Linkage::Appending);
+        }
+        if self.input.match_keyword("extern_weak")? {
+            return Ok(Linkage::ExternWeak);
+        }
+        if self.input.match_keyword("linkonce_odr")? {
+            return Ok(Linkage::LinkonceOdr);
+        }
+        if self.input.match_keyword("weak_odr")? {
+            return Ok(Linkage::WeakOdr);
+        }
+        if self.input.match_keyword("external")? {
+            return Ok(Linkage::External);
+        }
+        self.input.parse_error("expected a linkage")
     }
 
     /// Parse the right-hand side of a `%dest = ...` instruction.
