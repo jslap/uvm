@@ -1424,7 +1424,9 @@ impl Parser
                 inbounds = true;
             } else if self.input.match_keyword("nuw")? || self.input.match_keyword("nusw")? {
                 // flag with no effect on our model
-            } else {
+            } else if self.input.match_keyword("inrange")? {
+                self.skip_parens()?;
+            }else {
                 break;
             }
         }

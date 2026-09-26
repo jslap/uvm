@@ -27,6 +27,19 @@ const USAGE: &str = "usage: uvclang <input.c|.ll> [-o out.asm] [-O0|-O1|-O2|-O3]
 const ISSUE_URL: &str = "https://github.com/maximecb/uvm/issues/new";
 
 static STDIO_C_CONTENT: &str = include_str!("../lib_src/stdio.c");
+static NEW_OPERATOR_DEF: &str = r#"
+ #include <stdlib.h>   // malloc/free
+ #include <assert.h>
+
+ void* operator new(size_t size)   { if (size == 0) size = 1; return malloc(size); }
+ void* operator new[](size_t size) { if (size == 0) size = 1; return malloc(size); }
+ void  operator delete(void* p) noexcept              { free(p); }
+ void  operator delete(void* p, size_t) noexcept      { free(p); }
+ void  operator delete[](void* p) noexcept            { free(p); }
+ void  operator delete[](void* p, size_t) noexcept    { free(p); }
+
+ extern "C" void __cxa_pure_virtual() { assert(0); }
+ "#;
 
 fn main()
 {
@@ -152,7 +165,8 @@ fn main()
 
     // Compute runtime modules
     let runtime_srcs_c = vec![
-        ("stdio.c", STDIO_C_CONTENT)
+        ("stdio.c", STDIO_C_CONTENT),
+        ("new.cpp", NEW_OPERATOR_DEF),
         ];
 
     let runtime_ir_c : Vec<(String, String)> = runtime_srcs_c
@@ -170,8 +184,10 @@ fn main()
                 exit(1);
             }
 
+            let mut this_fe = fe.clone();
+            this_fe.is_cpp = frontend::is_cpp_path(&file_name);
             let src_path = src_file.path().to_str().expect("temp path is not valid UTF-8");
-            match frontend::compile_to_ir(src_path, &fe) {
+            match frontend::compile_to_ir(src_path, &this_fe) {
                 Ok(ir) => (ir, format!("runtime_{}", file_name)),
                 Err(e) => {
                     eprintln!("runtime module error: {}", e);
