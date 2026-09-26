@@ -1943,6 +1943,14 @@ impl<'a> Codegen<'a>
             return self.gen_umul_overflow(ctx, dest, &args[0], &args[1].val);
         }
 
+        if bare.starts_with("trap") {
+            let exit_code = Value::Int(-1);
+            self.push_value(ctx, &exit_code, 4)?;
+            self.line(&format!("syscall {};", "exit"));
+
+            return Ok(());
+        }
+
         // --- value-producing intrinsics ---
         let a = &args[0].val;
         if bare.starts_with("abs.") {
