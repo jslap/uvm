@@ -1552,13 +1552,35 @@ impl Parser
     fn read_word(&mut self) -> String
     {
         let mut s = String::new();
-        loop {
-            let c = self.input.peek_ch();
-            if c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-' || c == '$' {
-                s.push(c);
-                self.input.eat_ch();
-            } else {
-                break;
+        if self.input.peek_ch() == '"' {
+            self.input.eat_ch();
+            loop {
+                let c = self.input.peek_ch();
+                if c == '\\' {
+                    let c1 = self.input.eat_ch();
+                    let c2 = self.input.eat_ch();
+                    let hex_str = format!("{c1}{c2}"); 
+                    let ascii_num = u8::from_str_radix(&hex_str, 16).unwrap();
+                    s.push(ascii_num as char);
+                }
+                else if c == '"' {
+                    self.input.eat_ch();
+                    break;
+                }
+                else {
+                    s.push(c);
+                    self.input.eat_ch();
+                } 
+            }
+        } else {
+            loop {
+                let c = self.input.peek_ch();
+                if c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-' || c == '$' {
+                    s.push(c);
+                    self.input.eat_ch();
+                } else {
+                    break;
+                }
             }
         }
         s

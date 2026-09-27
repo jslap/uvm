@@ -21,7 +21,6 @@
 // translation units without duplicate-symbol errors at link time.
 
 #include <stdint.h>          // uint64_t / uintptr_t
-#include <stdatomic.h>       // _Atomic, atomic_* (lowered to UVM atomic ops)
 #include <uvm/syscalls.h>    // __uvm_thread_spawn / __uvm_thread_join / __uvm_thread_sleep
 
 #ifndef UVCLANG_WEAK
@@ -52,7 +51,7 @@
 // keeps PTHREAD_MUTEX_INITIALIZER usable as a brace initializer.
 typedef struct
 {
-    _Atomic uint64_t __state;
+    volatile uint64_t __state;
 } pthread_mutex_t;
 
 // Static initializer for an unlocked mutex: pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
@@ -63,7 +62,7 @@ typedef struct
 UVCLANG_WEAK int pthread_mutex_init(pthread_mutex_t* mutex, const void* attr)
 {
     (void)attr;
-    atomic_store(&mutex->__state, __PTHREAD_MUTEX_UNLOCKED);
+    __atomic_store_n(&mutex->__state, __PTHREAD_MUTEX_UNLOCKED, __ATOMIC_SEQ_CST);
     return 0;
 }
 
@@ -79,7 +78,8 @@ UVCLANG_WEAK int pthread_mutex_destroy(pthread_mutex_t* mutex)
 UVCLANG_WEAK int pthread_mutex_trylock(pthread_mutex_t* mutex)
 {
     uint64_t expected = __PTHREAD_MUTEX_UNLOCKED;
-    if (atomic_compare_exchange_strong(&mutex->__state, &expected, __PTHREAD_MUTEX_LOCKED)) {
+    if (__atomic_compare_exchange_n(&mutex->__state, &expected, __PTHREAD_MUTEX_LOCKED,
+             /*weak=*/0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
         return 0;
     }
     return EBUSY;
@@ -92,7 +92,8 @@ UVCLANG_WEAK int pthread_mutex_trylock(pthread_mutex_t* mutex)
 UVCLANG_WEAK int pthread_mutex_lock(pthread_mutex_t* mutex)
 {
     uint64_t expected = __PTHREAD_MUTEX_UNLOCKED;
-    while (!atomic_compare_exchange_weak(&mutex->__state, &expected, __PTHREAD_MUTEX_LOCKED)) {
+    while (!__atomic_compare_exchange_n(&mutex->__state, &expected, __PTHREAD_MUTEX_LOCKED,
+             /*weak=*/1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
         // A failed compare_exchange overwrites `expected` with the value it
         // actually found; reset it so the next attempt again swaps 0 -> 1.
         expected = __PTHREAD_MUTEX_UNLOCKED;
@@ -106,7 +107,7 @@ UVCLANG_WEAK int pthread_mutex_lock(pthread_mutex_t* mutex)
 // returns 0.
 UVCLANG_WEAK int pthread_mutex_unlock(pthread_mutex_t* mutex)
 {
-    atomic_store(&mutex->__state, __PTHREAD_MUTEX_UNLOCKED);
+    __atomic_store_n(&mutex->__state, __PTHREAD_MUTEX_UNLOCKED, __ATOMIC_SEQ_CST);
     return 0;
 }
 

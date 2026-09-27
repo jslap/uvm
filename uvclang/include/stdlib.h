@@ -211,6 +211,14 @@ UVCLANG_WEAK void srand(unsigned int seed)
     __uvclang_rand_state = ((unsigned long)seed << 1) + 1;
 }
 
+typedef struct { int quot, rem; } div_t;
+typedef struct { long quot, rem; } ldiv_t;
+typedef struct { long long quot, rem; } lldiv_t;
+
+static inline div_t   div(int x, int y)             { div_t r   = { x / y, x % y }; return r; }
+static inline ldiv_t  ldiv(long x, long y)           { ldiv_t r  = { x / y, x % y }; return r; }
+static inline lldiv_t lldiv(long long x, long long y){ lldiv_t r = { x / y, x % y }; return r; }
+
 // --- free-list allocator ---------------------------------------------------
 // A segregated free-list allocator with boundary-tag coalescing over the UVM
 // heap. Unlike a bump allocator, free() reclaims memory: freed chunks are
@@ -239,7 +247,6 @@ UVCLANG_WEAK void srand(unsigned int seed)
 #define __uvclang_align_up(x, n) \
     (((uint64_t)(x) + ((uint64_t)(n) - 1)) & ~((uint64_t)(n) - 1))
 
-#include <stdatomic.h>       // _Atomic / atomic_* for the allocator's spin lock
 
 #define __UVCLANG_MIN_CHUNK 32u        // header(8) + fd(8) + bk(8) + footer(8)
 #define __UVCLANG_NBINS     48
@@ -256,19 +263,20 @@ UVCLANG_WEAK uint8_t *__uvclang_bins[__UVCLANG_NBINS] = {0};
 UVCLANG_WEAK uint8_t *__uvclang_top = 0;        // wilderness chunk (0 = uninit)
 UVCLANG_WEAK uint64_t __uvclang_heap_base = 0;  // first usable heap address
 UVCLANG_WEAK uint64_t __uvclang_heap_end = 0;   // current heap size (end addr)
-UVCLANG_WEAK _Atomic uint64_t __uvclang_malloc_lock = 0;
+UVCLANG_WEAK volatile uint64_t __uvclang_malloc_lock = 0;
 
 // Acquire/release the global allocator lock. Spins on a CAS; the guest threads
 // are real and preemptively scheduled, so a holder always makes progress.
 static inline void __uvclang_lock(void)
 {
     uint64_t expected = 0;
-    while (!atomic_compare_exchange_weak(&__uvclang_malloc_lock, &expected, 1))
+    while (!__atomic_compare_exchange_n(&__uvclang_malloc_lock, &expected, 1,
+                /*weak=*/1, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
         expected = 0;
 }
 static inline void __uvclang_unlock(void)
 {
-    atomic_store(&__uvclang_malloc_lock, 0);
+    __atomic_store_n(&__uvclang_malloc_lock, 0, __ATOMIC_SEQ_CST);
 }
 
 static inline void __uvclang_die(const char *msg)

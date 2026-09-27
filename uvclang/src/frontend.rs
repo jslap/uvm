@@ -103,7 +103,6 @@ fn get_base_compile_cmd(program: &String, opts: &FrontendOpts) -> Command
     cmd
     .arg("--target=x86_64-linux-gnu")
     .arg(&opts.opt_level)
-    .arg(format!("-I{}", uvm_include_dir()))
     // Canonical uvclang flags: keep value names for readable IR, and
     // disable the transforms that produce IR the back-end intentionally
     // does not support.
@@ -122,8 +121,17 @@ fn get_base_compile_cmd(program: &String, opts: &FrontendOpts) -> Command
         .arg("-D_Bool=bool")
         .arg("-fno-exceptions") // may be support later
         .arg("-fno-rtti")  // may be support later
+        .arg("-nostdinc++")
+        .args(["-cxx-isystem", "/Users/js/Documents/Dev/third/uvm/uvclang/third_party/libcxx/include"])
+        .args(["-cxx-isystem", &uvm_include_dir()])
         .arg("-std=c++23");
     }
+    else {
+        cmd.args(["-isystem", &uvm_include_dir()]);        
+    }
+
+
+    // cmd.arg("-v");
     
     // User -D / -I (and any other forwarded flags), after ours so the user can
     // override the built-in include search.
