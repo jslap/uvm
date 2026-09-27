@@ -97,10 +97,10 @@ for src in "$TESTS"/*.c "$TESTS"/*.cpp "$TESTS"/multi_file_tests/*/; do
                 # it must use the platform libc, not uvclang's UVM-side headers,
                 # so the stdlib headers are genuinely tested differentially.
                 case "$src" in
-                    *.cpp*) native_compiler="$NATIVE_CXX" ;;
-                    *)      native_compiler="$NATIVE_CC" ;;
+                    *.cpp*) native_compiler=("$NATIVE_CXX" -std=c++23) ;;
+                    *)      native_compiler=("$NATIVE_CC") ;;
                 esac
-                if ! "$native_compiler" "$opt" -w $src -o "$TMP/ref" 2>/dev/null; then
+                if ! "${native_compiler[@]}" "$opt" -w $src -o "$TMP/ref" 2>/dev/null; then
                     echo "SKIP $name (native compile failed)"; skip=$((skip+1)); continue
                 fi
                 ref_out=$("$TMP/ref" 2>/dev/null); ref_code=$?
