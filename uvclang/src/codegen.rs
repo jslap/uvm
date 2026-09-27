@@ -675,16 +675,28 @@ impl<'a> Codegen<'a>
                 self.store_dest(ctx, inst.dest.as_deref())?;
             }
             InstKind::Load { ty, ptr, .. } => {
-                let bits = self.scalar_bits(ty)?;
-                self.push_value(ctx, ptr, 64)?;
-                self.line(&format!("load_u{};", bits));
+                let n = self.get_current_layout().size_of(ty);
+                match n {
+                    1 | 2 | 4 | 8 => {
+                        self.push_value(ctx, ptr, 64)?;
+                        self.line(&format!("load_u{};", n * 8));
+                    }
+                    3 | 5 | 6 | 7 => self.emit_load_decomposed(ctx, ptr, n as u32)?,
+                    _ => return Err(format!("load of non-scalar type {} ({} bytes)", type_str(ty), n)),
+                }
                 self.store_dest(ctx, inst.dest.as_deref())?;
             }
             InstKind::Store { ty, val, ptr, .. } => {
-                let bits = self.scalar_bits(ty)?;
-                self.push_value(ctx, ptr, 64)?; // address (popped second by store)
-                self.push_value(ctx, val, scalar_width(ty)?)?; // value (popped first)
-                self.line(&format!("store_u{};", bits));
+                let n = self.get_current_layout().size_of(ty);
+                match n {
+                    1 | 2 | 4 | 8 => {
+                        self.push_value(ctx, ptr, 64)?; // address (popped second by store)
+                        self.push_value(ctx, val, scalar_width(ty)?)?; // value (popped first)
+                        self.line(&format!("store_u{};", n * 8));
+                    }
+                    3 | 5 | 6 | 7 => self.emit_store_decomposed(ctx, ptr, val, n as u32)?,
+                    _ => return Err(format!("store of non-scalar type {} ({} bytes)", type_str(ty), n)),
+                }
             }
             InstKind::Alloca { ty, count, align } => {
                 let dest = inst.dest.as_deref().ok_or("alloca without result")?;
@@ -2594,8 +2606,61 @@ impl<'a> Codegen<'a>
             8 => self.line("trunc_u8;"),
             16 => self.line("trunc_u16;"),
             32 => self.line("trunc_u32;"),
-            _ => {} // 64: nothing to do
+            64.. => {} // native slot width: nothing to clear
+            _ => {
+                // Non-power-of-two width from ABI struct-return coercion (e.g.
+                // i40 for a 5-byte struct): mask to the low `w` bits directly.
+                let mask: u64 = (1u64 << w) - 1;
+                self.line(&format!("push {};", mask));
+                self.line("and_u64;");
+            }
         }
+    }
+
+    /// Store a `n`-byte scalar (n = 3, 5, 6, or 7 -- the counts not covered by
+    /// a direct `store_u8/16/32/64` op) by decomposing it into the largest
+    /// available chunks. Each chunk re-pushes the address (offset as needed)
+    /// and a right-shifted copy of the full 64-bit value, so no chunk touches
+    /// bytes outside its own range.
+    fn emit_store_decomposed(&mut self, ctx: &FnCtx, ptr: &Value, val: &Value, n: u32) -> Result<(), String>
+    {
+        for (offset, size) in decompose_bytes(n) {
+            self.push_value(ctx, ptr, 64)?;
+            if offset != 0 {
+                self.push_int(offset as i128, 64);
+                self.line("add_u64;");
+            }
+            self.push_value(ctx, val, 64)?;
+            if offset != 0 {
+                self.push_int((offset * 8) as i128, 64);
+                self.line("rshift_u64;");
+            }
+            self.line(&format!("store_u{};", size * 8));
+        }
+        Ok(())
+    }
+
+    /// Load a `n`-byte scalar (n = 3, 5, 6, or 7) by loading each available
+    /// chunk zero-extended, shifting it into place, and OR-ing the chunks
+    /// together into a single 64-bit slot value.
+    fn emit_load_decomposed(&mut self, ctx: &FnCtx, ptr: &Value, n: u32) -> Result<(), String>
+    {
+        for (i, (offset, size)) in decompose_bytes(n).into_iter().enumerate() {
+            self.push_value(ctx, ptr, 64)?;
+            if offset != 0 {
+                self.push_int(offset as i128, 64);
+                self.line("add_u64;");
+            }
+            self.line(&format!("load_u{};", size * 8)); // zero-extends into the 64-bit slot
+            if offset != 0 {
+                self.push_int((offset * 8) as i128, 64);
+                self.line("lshift_u64;");
+            }
+            if i != 0 {
+                self.line("or_u64;");
+            }
+        }
+        Ok(())
     }
 
     // -- output ---------------------------------------------------------------
@@ -2816,6 +2881,24 @@ fn mask_to_width(v: i128, width: u32) -> u64
     } else {
         ((v as u128) & ((1u128 << width) - 1)) as u64
     }
+}
+
+/// Greedily split `n` bytes (3, 5, 6, or 7 -- the counts `load_u*`/`store_u*`
+/// don't cover directly) into (offset, size) chunks using the largest
+/// available op each step.
+fn decompose_bytes(n: u32) -> Vec<(u32, u32)>
+{
+    let mut offset = 0;
+    let mut remaining = n;
+    let mut chunks = Vec::new();
+    for size in [4, 2, 1] {
+        while remaining >= size {
+            chunks.push((offset, size));
+            offset += size;
+            remaining -= size;
+        }
+    }
+    chunks
 }
 
 fn align_up(off: u64, align: u64) -> u64
