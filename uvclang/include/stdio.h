@@ -740,6 +740,9 @@ FILE *fopen(const char *path, const char *mode);
 // stream is NULL.
 int fclose(FILE *stream);
 
+// Stub for now
+static inline int remove(const char *filename) { (void)filename; return -1; }
+
 // Read up to `nmemb` elements of `size` bytes into `ptr`. Loops over file_read
 // so a short syscall read (fewer bytes than asked, without EOF) still fills the
 // request. Returns the number of *complete* elements read; a partial final
