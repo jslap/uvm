@@ -45,7 +45,7 @@ pub enum Type
     /// Opaque pointer: `ptr`.
     Ptr,
     /// `[N x T]`
-    Array { len: u64, elem: Box<Type> },
+    Array { packed: bool, len: u64, elem: Box<Type> },
     /// A reference to a named struct type, e.g. `%struct.foo`.
     NamedStruct(String),
     /// An inline (literal) struct type: `{ ... }` or packed `<{ ... }>`.

@@ -1127,7 +1127,7 @@ impl Parser
             self.expect_keyword("x")?;
             let elem = self.parse_type()?;
             self.input.expect_token("]")?;
-            return Ok(Type::Array { len, elem: Box::new(elem) });
+            return Ok(Type::Array { packed: false, len, elem: Box::new(elem) });
         }
         // Literal struct `{ ... }`.
         if c == '{' {
@@ -1137,9 +1137,18 @@ impl Parser
         // Packed literal struct `<{ ... }>`.
         if c == '<' {
             self.input.eat_ch(); // '<'
-            let fields = self.parse_struct_fields()?;
-            self.input.expect_token(">")?;
-            return Ok(Type::Struct(StructBody { packed: true, fields }));
+            if self.input.peek_ch() == '{' {
+                let fields = self.parse_struct_fields()?;
+                self.input.expect_token(">")?;
+                return Ok(Type::Struct(StructBody { packed: true, fields }));
+            } else {
+                self.input.eat_ws()?;
+                let len = self.input.parse_int(10)? as u64;
+                self.expect_keyword("x")?;
+                let elem = self.parse_type()?;
+                self.input.expect_token(">")?;
+                return Ok(Type::Array { packed: true, len, elem: Box::new(elem) });
+            }
         }
         // Named struct reference `%struct.foo`.
         if c == '%' {
