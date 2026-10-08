@@ -681,6 +681,7 @@ impl<'a> Codegen<'a>
                         self.push_value(ctx, ptr, 64)?;
                         self.line(&format!("load_u{};", n * 8));
                     }
+                    // _ => self.emit_load_decomposed(ctx, ptr, n as u32)?,
                     3 | 5 | 6 | 7 => self.emit_load_decomposed(ctx, ptr, n as u32)?,
                     _ => return Err(format!("load of non-scalar type {} ({} bytes)", type_str(ty), n)),
                 }
@@ -694,6 +695,7 @@ impl<'a> Codegen<'a>
                         self.push_value(ctx, val, scalar_width(ty)?)?; // value (popped first)
                         self.line(&format!("store_u{};", n * 8));
                     }
+                    // _ => self.emit_store_decomposed(ctx, ptr, val, n as u32)?,
                     3 | 5 | 6 | 7 => self.emit_store_decomposed(ctx, ptr, val, n as u32)?,
                     _ => return Err(format!("store of non-scalar type {} ({} bytes)", type_str(ty), n)),
                 }

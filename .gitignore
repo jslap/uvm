@@ -5,3 +5,6 @@ vm/SDL2.dll
 
 TODO.txt
 uvclang/third_party/*
+.idea/*
+uvclang/*.ir
+*.ir

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+serde = { version = "1.0.152", features = ["derive"] }
 itertools = "0.15.0"
 tempfile = "3.27.0"
 rustc-hash = "2"

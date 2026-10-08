@@ -130,9 +130,6 @@ fn get_base_compile_cmd(program: &String, opts: &FrontendOpts) -> Command
         cmd.args(["-isystem", &uvm_include_dir()]);        
     }
 
-
-    // cmd.arg("-v");
-    
     // User -D / -I (and any other forwarded flags), after ours so the user can
     // override the built-in include search.
     for a in &opts.passthrough {

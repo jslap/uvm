@@ -642,7 +642,11 @@ end-to-end suite is `tests/run_frontend_tests.sh` (102 pass / 0 fail / 0 skip).
           At the end, check that symbols were defined.
           Test with 2 C files
     - [x] Support runtime C stdio.
-    - [ ] Add a TU for run-time code with internal new. (could use a .cpp file, or cache the IR result, or cache the parsed uvm), and 'link' c++-new to the internal new 
+    - [x] Add a TU for run-time code with internal new. (could use a .cpp file, or cache the IR result, or cache the parsed uvm), and 'link' c++-new to the internal new 
+    - [ ] support https://llvm.org/docs/LangRef.html#insertelement-instruction for c++ algorithm.
+    - [ ] support lib c++ ru-time for string example. Need supprt for https://llvm.org/docs/LangRef.html#aliases 
+    - [ ] shared ptr with -O0, missing operand bundle support in call https://llvm.org/docs/LangRef.html#id348, in -O1, we need compiled run-time.
+    - [ ] support load and store of element larger than 64 bits.
 
 ### Phase 10 — doom bring-up on a real, graphical UVM runtime
 Merged with the former Phase 11 runtime work: build the real syscall-backed
@@ -723,6 +727,11 @@ the doom path (doom's only libc external is `@strlen`, already covered).
       diagnostic on stdout; no native reference).
 - [ ] `<math.h>` and the other hosted headers: add only when a concrete program
       (or the C++ bring-up) needs them.
+
+### Othe Stuff
+- [ ] Do not rely on external command, and call clang library instead of executable
+- [ ] Support debug info with uvclang, Does the vm support debug info? 
+- [ ] Paralellize run_tests
 
 ## Non-goals (for now)
 - No optimization. Naive, correct lowering only.

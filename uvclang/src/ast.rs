@@ -10,9 +10,10 @@
 //! parsing and have no representation here.
 
 use rustc_hash::FxHashMap as HashMap;
+use serde::{Deserialize, Serialize};
 
 /// A whole translation unit.
-#[derive(Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Module
 {
     pub source_filename: Option<String>,
@@ -31,7 +32,7 @@ pub struct Module
 // Types
 // ===========================================================================
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Type
 {
     Void,
@@ -58,7 +59,7 @@ pub enum Type
     Metadata,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Linkage
 {
     Private,
@@ -74,14 +75,14 @@ pub enum Linkage
     External
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StructBody
 {
     pub packed: bool,
     pub fields: Vec<Type>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FuncType
 {
     pub ret: Type,
@@ -96,7 +97,7 @@ pub struct FuncType
 /// A value operand. The associated type is supplied by the enclosing
 /// instruction (LLVM writes the type once, e.g. `add i32 %a, %b`), except
 /// for constant expressions and aggregates which carry their own types.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Value
 {
     /// `%name` or `%1` — an SSA local or basic-block-local reference.
@@ -129,14 +130,14 @@ pub enum Value
 /// A `<type> <value>` pair, as written in LLVM text wherever the type is
 /// spelled out explicitly (global initializers, aggregate elements, call
 /// arguments, gep indices, const-expr operands, ...).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypedVal
 {
     pub ty: Type,
     pub val: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConstExpr
 {
     /// `getelementptr [inbounds] (base_ty, ptr <base>, <indices...>)`
@@ -157,7 +158,7 @@ pub enum ConstExpr
 // Globals & functions
 // ===========================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Global
 {
     pub name: String,
@@ -170,7 +171,7 @@ pub struct Global
     pub linkage: Linkage,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Param
 {
     pub ty: Type,
@@ -178,7 +179,7 @@ pub struct Param
     pub name: Option<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Function
 {
     pub name: String,
@@ -195,7 +196,7 @@ impl Function
     pub fn is_decl(&self) -> bool { self.blocks.is_empty() }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BasicBlock
 {
     pub label: String,
@@ -210,7 +211,7 @@ pub struct BasicBlock
 // ===========================================================================
 
 /// A non-terminator instruction with its optional result name (the `%x =`).
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Inst
 {
     /// Result SSA name (without the `%`), or `None` for value-less insts
@@ -219,7 +220,7 @@ pub struct Inst
     pub kind: InstKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum InstKind
 {
     /// Integer binary op: `add`, `sub`, `mul`, `udiv`, `sdiv`, `urem`,
@@ -287,13 +288,13 @@ pub enum InstKind
 }
 
 /// Operation performed by an `atomicrmw` instruction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RmwOp
 {
     Xchg, Add, Sub, And, Or, Xor, Nand,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Terminator
 {
     /// `ret void` or `ret <ty> <val>`
@@ -311,20 +312,20 @@ pub enum Terminator
     Unreachable,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BinOp
 {
     Add, Sub, Mul, UDiv, SDiv, URem, SRem,
     And, Or, Xor, Shl, LShr, AShr,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FBinOp
 {
     FAdd, FSub, FMul, FDiv, FRem,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConvOp
 {
     Trunc, ZExt, SExt, PtrToInt, IntToPtr, BitCast,
@@ -336,7 +337,7 @@ pub enum ConvOp
     FPExt, FPTrunc,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ICmpPred
 {
     Eq, Ne, Ugt, Uge, Ult, Ule, Sgt, Sge, Slt, Sle,
@@ -345,7 +346,7 @@ pub enum ICmpPred
 /// Floating-point comparison predicate (`fcmp`). The `o*` forms are ordered
 /// (false if either operand is NaN); the `u*` forms are unordered (true if
 /// either is NaN). `Ord`/`Uno` test only for the absence/presence of NaN.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FCmpPred
 {
     False, Oeq, Ogt, Oge, Olt, Ole, One, Ord,
