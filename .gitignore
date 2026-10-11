@@ -4,3 +4,6 @@ target
 vm/SDL2.dll
 
 TODO.txt
+.idea/*
+uvclang/*.ir
+*.ir

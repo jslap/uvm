@@ -135,6 +135,7 @@ impl Parser
     {
         let name = self.parse_global_name()?;
         self.input.expect_token("=")?;
+        let linkage = self.parse_linkage().unwrap_or(Linkage::External);
         self.skip_attrs()?; // linkage, unnamed_addr, ...
 
         let is_const = if self.input.match_keyword("constant")? {
@@ -157,7 +158,7 @@ impl Parser
 
         // Trailing `, align N`, comdat, metadata attachments, ...
         self.skip_line();
-        Ok(Global { name, ty, is_const, init })
+        Ok(Global { name, ty, is_const, init, linkage })
     }
 
     fn parse_type_def(&mut self) -> Result<(String, Option<StructBody>), ParseError>
@@ -182,6 +183,7 @@ impl Parser
 
     fn parse_define(&mut self) -> Result<Function, ParseError>
     {
+        let linkage = self.parse_linkage().unwrap_or(Linkage::External);
         self.skip_attrs()?; // linkage / visibility (internal, dso_local, ...)
         self.skip_call_cconv()?; // calling convention (fastcc, coldcc, ...)
         self.skip_attrs()?; // return-value attributes (noundef, ...)
@@ -194,11 +196,12 @@ impl Parser
         self.input.expect_token("{")?;
 
         let blocks = self.parse_body()?;
-        Ok(Function { name, ret_ty, params, varargs, blocks })
+        Ok(Function { name, ret_ty, params, varargs, linkage, blocks })
     }
 
     fn parse_declare(&mut self) -> Result<Function, ParseError>
     {
+        let linkage = self.parse_linkage().unwrap_or(Linkage::External);
         self.skip_attrs()?;
         self.skip_call_cconv()?; // calling convention (fastcc, coldcc, ...)
         self.skip_attrs()?;
@@ -208,7 +211,7 @@ impl Parser
         let (params, varargs) = self.parse_param_list()?;
         self.input.expect_token(")")?;
         self.skip_line(); // trailing attributes
-        Ok(Function { name, ret_ty, params, varargs, blocks: vec![] })
+        Ok(Function { name, ret_ty, params, varargs, linkage, blocks: vec![] })
     }
 
     /// Parse a parenthesized parameter list (the opening `(` is already
@@ -275,7 +278,7 @@ impl Parser
             }
 
             // Otherwise: a block label (`name:`) or a no-result instruction.
-            let word = self.read_word();
+            let word = self.read_word()?;
             if word.is_empty() {
                 return self.input.parse_error("unexpected character in function body");
             }
@@ -329,11 +332,51 @@ impl Parser
         Ok(blocks)
     }
 
+    fn parse_linkage(&mut self) -> Result<Linkage, ParseError>
+    {
+        self.input.eat_ws()?;
+
+        if self.input.match_keyword("private")? {
+            return Ok(Linkage::Private);
+        }
+        if self.input.match_keyword("internal")? {
+            return Ok(Linkage::Internal);
+        }
+        if self.input.match_keyword("available_externally")? {
+            return Ok(Linkage::AvailExternally);
+        }
+        if self.input.match_keyword("linkonce")? {
+            return Ok(Linkage::Linkonce);
+        }
+        if self.input.match_keyword("weak")? {
+            return Ok(Linkage::Weak);
+        }
+        if self.input.match_keyword("common")? {
+            return Ok(Linkage::Common);
+        }
+        if self.input.match_keyword("appending")? {
+            return Ok(Linkage::Appending);
+        }
+        if self.input.match_keyword("extern_weak")? {
+            return Ok(Linkage::ExternWeak);
+        }
+        if self.input.match_keyword("linkonce_odr")? {
+            return Ok(Linkage::LinkonceOdr);
+        }
+        if self.input.match_keyword("weak_odr")? {
+            return Ok(Linkage::WeakOdr);
+        }
+        if self.input.match_keyword("external")? {
+            return Ok(Linkage::External);
+        }
+        self.input.parse_error("expected a linkage")
+    }
+
     /// Parse the right-hand side of a `%dest = ...` instruction.
     fn parse_value_inst(&mut self) -> Result<InstKind, ParseError>
     {
         self.input.eat_ws()?;
-        let op = self.read_word();
+        let op = self.read_word()?;
         match op.as_str() {
             "add" => self.parse_bin(BinOp::Add),
             "sub" => self.parse_bin(BinOp::Sub),
@@ -622,7 +665,7 @@ impl Parser
     fn parse_atomicrmw(&mut self) -> Result<InstKind, ParseError>
     {
         self.input.match_keyword("volatile")?;
-        let op_word = self.read_word();
+        let op_word = self.read_word()?;
         let op = match op_word.as_str() {
             "xchg" => RmwOp::Xchg,
             "add" => RmwOp::Add,
@@ -882,14 +925,14 @@ impl Parser
         if !self.input.match_char('!') {
             return self.input.parse_error("expected '!'");
         }
-        self.read_word(); // metadata kind (tbaa, dbg, llvm.loop, ...)
+        self.read_word()?; // metadata kind (tbaa, dbg, llvm.loop, ...)
         self.input.eat_ws()?;
         if self.input.peek_ch() == '!' {
             self.input.eat_ch();
             if self.input.peek_ch() == '{' {
                 self.skip_braces()?;
             } else {
-                self.read_word();
+                self.read_word()?;
             }
         }
         Ok(())
@@ -1084,7 +1127,7 @@ impl Parser
             self.expect_keyword("x")?;
             let elem = self.parse_type()?;
             self.input.expect_token("]")?;
-            return Ok(Type::Array { len, elem: Box::new(elem) });
+            return Ok(Type::Array { packed: false, len, elem: Box::new(elem) });
         }
         // Literal struct `{ ... }`.
         if c == '{' {
@@ -1094,9 +1137,18 @@ impl Parser
         // Packed literal struct `<{ ... }>`.
         if c == '<' {
             self.input.eat_ch(); // '<'
-            let fields = self.parse_struct_fields()?;
-            self.input.expect_token(">")?;
-            return Ok(Type::Struct(StructBody { packed: true, fields }));
+            if self.input.peek_ch() == '{' {
+                let fields = self.parse_struct_fields()?;
+                self.input.expect_token(">")?;
+                return Ok(Type::Struct(StructBody { packed: true, fields }));
+            } else {
+                self.input.eat_ws()?;
+                let len = self.input.parse_int(10)? as u64;
+                self.expect_keyword("x")?;
+                let elem = self.parse_type()?;
+                self.input.expect_token(">")?;
+                return Ok(Type::Array { packed: true, len, elem: Box::new(elem) });
+            }
         }
         // Named struct reference `%struct.foo`.
         if c == '%' {
@@ -1381,7 +1433,9 @@ impl Parser
                 inbounds = true;
             } else if self.input.match_keyword("nuw")? || self.input.match_keyword("nusw")? {
                 // flag with no effect on our model
-            } else {
+            } else if self.input.match_keyword("inrange")? {
+                self.skip_parens()?;
+            }else {
                 break;
             }
         }
@@ -1504,19 +1558,42 @@ impl Parser
     /// Read an LLVM identifier word (no sigil): the character class allowed in
     /// unquoted names — alphanumerics plus `_ . - $`. Assumes leading
     /// whitespace has already been consumed.
-    fn read_word(&mut self) -> String
+    fn read_word(&mut self) ->  Result<String, ParseError>
     {
         let mut s = String::new();
-        loop {
-            let c = self.input.peek_ch();
-            if c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-' || c == '$' {
-                s.push(c);
-                self.input.eat_ch();
-            } else {
-                break;
+        if self.input.peek_ch() == '"' {
+            self.input.eat_ch();
+            loop {
+                let c = self.input.peek_ch();
+                if c == '\\' {
+                    let c1 = self.input.eat_ch();
+                    let c2 = self.input.eat_ch();
+                    let hex_str = format!("{c1}{c2}"); 
+                    let ascii_num = u8::from_str_radix(&hex_str, 16)
+                        .map_err(|_| ParseError::new(&self.input, "invalid \\xx escape in quoted identifier"))?;
+                    s.push(ascii_num as char);
+                }
+                else if c == '"' {
+                    self.input.eat_ch();
+                    break;
+                }
+                else {
+                    s.push(c);
+                    self.input.eat_ch();
+                } 
+            }
+        } else {
+            loop {
+                let c = self.input.peek_ch();
+                if c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-' || c == '$' {
+                    s.push(c);
+                    self.input.eat_ch();
+                } else {
+                    break;
+                }
             }
         }
-        s
+        Ok(s)
     }
 
     /// Parse `%name`, returning the bare name.
@@ -1526,7 +1603,7 @@ impl Parser
         if !self.input.match_char('%') {
             return self.input.parse_error("expected '%' local name");
         }
-        let name = self.read_word();
+        let name = self.read_word()?;
         if name.is_empty() {
             return self.input.parse_error("expected local name after '%'");
         }
@@ -1540,7 +1617,7 @@ impl Parser
         if !self.input.match_char('@') {
             return self.input.parse_error("expected '@' global name");
         }
-        let name = self.read_word();
+        let name = self.read_word()?;
         if name.is_empty() {
             return self.input.parse_error("expected global name after '@'");
         }

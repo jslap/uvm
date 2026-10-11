@@ -13,6 +13,7 @@ use std::path::Path;
 use std::process::Command;
 
 /// Options controlling the clang invocation, gathered from the uvclang CLI.
+#[derive(Clone)]
 pub struct FrontendOpts
 {
     /// Optimization level flag, e.g. `-O2` (the default; overridable on the CLI).
@@ -102,7 +103,6 @@ fn get_base_compile_cmd(program: &String, opts: &FrontendOpts) -> Command
     cmd
     .arg("--target=x86_64-linux-gnu")
     .arg(&opts.opt_level)
-    .arg(format!("-I{}", uvm_include_dir()))
     // Canonical uvclang flags: keep value names for readable IR, and
     // disable the transforms that produce IR the back-end intentionally
     // does not support.
@@ -121,9 +121,14 @@ fn get_base_compile_cmd(program: &String, opts: &FrontendOpts) -> Command
         .arg("-D_Bool=bool")
         .arg("-fno-exceptions") // not yet supported
         .arg("-fno-rtti")  // not yet supported
+        .arg("-nostdinc++")
+        .args(["-cxx-isystem", &uvm_include_dir()])
         .arg("-std=c++23");
     }
-    
+    else {
+        cmd.args(["-isystem", &uvm_include_dir()]);        
+    }
+
     // User -D / -I (and any other forwarded flags), after ours so the user can
     // override the built-in include search.
     for a in &opts.passthrough {

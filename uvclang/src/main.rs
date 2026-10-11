@@ -8,12 +8,16 @@ mod lexer;
 mod parser;
 mod syscalls;
 
+use tempfile::Builder;
+
+use std::io::Write;
 use std::process::exit;
 
 use codegen::Codegen;
 use frontend::FrontendOpts;
 use lexer::{Lexer, ParseError};
 use parser::Parser;
+use crate::ast::Module;
 
 const USAGE: &str = "usage: uvclang <input.c|.ll> [-o out.asm] [-O0|-O1|-O2|-O3]\n       \
                      [-D<macro>] [-I<dir>] [-U<macro>] [-Wall|-W<warn>] [-std=<std>]\n       \
@@ -22,13 +26,70 @@ const USAGE: &str = "usage: uvclang <input.c|.ll> [-o out.asm] [-O0|-O1|-O2|-O3]
 /// URL for reporting LLVM IR uvclang cannot parse yet.
 const ISSUE_URL: &str = "https://github.com/maximecb/uvm/issues/new";
 
+static STDIO_C_CONTENT: &str = include_str!("../lib_src/stdio.c");
+
+pub enum Source
+{
+    Snippet(String),
+    FilePath(String),
+}
+
+pub struct SourceCompilation
+{
+    source_name: String,
+    source : Source,
+}
+
+fn ir_source(source : &SourceCompilation, fe : FrontendOpts) -> Result<(String, String), String>
+{
+    if frontend::is_ir_path(&source.source_name) {
+        match &source.source {
+            Source::Snippet(snippet) => Ok((snippet.clone(), source.source_name.clone())),
+            Source::FilePath(path) => {
+                match std::fs::read_to_string(path) {
+                    Ok(s) => Ok((s, source.source_name.clone())),
+                    Err(e) => Err(e.to_string())
+                }
+            }
+        }
+    } else {
+        let mut this_fe = fe.clone();
+        this_fe.is_cpp = frontend::is_cpp_path(&source.source_name);
+        match &source.source {
+            Source::Snippet(snippet) => {
+                let src_file = Builder::new()
+                    .suffix(&source.source_name)
+                    .tempfile()
+                    .and_then(|mut f| {
+                        writeln!(f, "{}", snippet)?;
+                        Ok(f)
+                    })
+                    .map_err(|e| e.to_string())?;
+                let tmp_file_name = src_file.path().to_str().ok_or("Path Error".to_string())?;
+                let ir_result = frontend::compile_to_ir(tmp_file_name, &this_fe)?;
+                Ok((ir_result, source.source_name.clone()))
+            },
+            Source::FilePath(path) => {
+                let ir_result = frontend::compile_to_ir(&*path, &this_fe)?;
+                Ok((ir_result, source.source_name.clone()))
+            }
+        }
+    }
+}
+
+fn compile_source(source : &SourceCompilation, fe : FrontendOpts) -> Result<Module, String>
+{
+    let (ir_str, src_name) = ir_source(source, fe)?;
+    parse(&*ir_str, &*src_name).map_err(|e| e.to_string())
+}
+
 fn main()
 {
     // Args: <input.c|.ll> [-o out.asm] [-O<n>] [-D..] [-I..] [--emit-ir] [--stats]
     // A `.ll` input is parsed directly (the back-end path, unchanged); any other
     // source is first lowered to IR by clang (the Phase 9 front-end).
     let args: Vec<String> = std::env::args().collect();
-    let mut input: Option<String> = None;
+    let mut inputs: Vec<String> = vec![];
     let mut out_path: Option<String> = None;
     let mut stats = false;
     let mut emit_ir = false;
@@ -64,64 +125,95 @@ fn main()
                 exit(2);
             }
             s => {
-                if input.is_none() {
-                    input = Some(s.to_string());
-                }
+                inputs.push(s.to_string());
             }
         }
         i += 1;
     }
 
-    let input = match input {
-        Some(p) => p,
-        None => {
-            eprintln!("{}", USAGE);
-            exit(2);
-        }
-    };
-
-    // Front-end: obtain textual LLVM IR either straight from a `.ll` file or by
-    // driving clang on a C/C++ source in-process (no temp `.ll` on disk).
-    let (ir, ir_name) = if frontend::is_ir_path(&input) {
-        match std::fs::read_to_string(&input) {
-            Ok(src) => (src, input.clone()),
-            Err(e) => {
-                eprintln!("could not read input file \"{}\": {}", input, e);
-                exit(1);
-            }
-        }
-    } else {
-        fe.is_cpp = frontend::is_cpp_path(&input);
-        match frontend::compile_to_ir(&input, &fe) {
-            Ok(ir) => (ir, input.clone()),
-            Err(e) => {
-                eprintln!("uvclang: {}", e);
-                exit(1);
-            }
-        }
+    if inputs.is_empty() {
+        eprintln!("{}", USAGE);
+        exit(2);
     };
 
     // --emit-ir: dump the front-end IR and stop (handy for growing C coverage).
     if emit_ir {
+        if inputs.len() != 1 {
+            eprintln!(
+                "uvclang: --emit-ir only supports a single input file (got {}); \
+                 invoke uvclang separately for each file",
+                inputs.len()
+            );
+            exit(2);
+        }
+        let (ir, _) = match ir_source(
+            &SourceCompilation {
+                source_name: inputs[0].clone(),
+                source: Source::FilePath(inputs[0].clone()),
+            },
+            fe,
+        ) {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("parse error: {}", e);
+                exit(1);
+            }
+        };
         emit(&out_path, ir);
         return;
     }
 
-    let module = match parse(&ir, &ir_name) {
-        Ok(m) => m,
+    let modules : Result<Vec<ast::Module>, String> = inputs.into_iter()
+        .map(|input| {
+            compile_source(
+                &SourceCompilation {
+                    source_name: input.clone(),
+                    source: Source::FilePath(input.clone()),
+                },
+                fe.clone(),
+            )
+        })
+        .collect();
+
+    let modules = match modules {
+        Ok(a) => a,
         Err(e) => {
-            eprintln!("parse error: {}", e);
+            eprintln!("module error: {}", e);
             print_unsupported_ir_hint();
             exit(1);
         }
     };
-
+    
     if stats {
-        print_stats(&ir_name, &module);
+        for module in &modules {
+            let path = module.source_filename.as_deref().unwrap_or("unknown module");
+            print_stats(path, module);
+        }
         return;
     }
 
-    let asm = match Codegen::new(&module).generate() {
+    // Compute runtime modules
+    let runtime_c_compilations = vec![
+        SourceCompilation {
+            source_name: "stdio.c".to_string(),
+            source: Source::Snippet(STDIO_C_CONTENT.to_string()),
+        }
+    ];
+
+    let runtime_c_modules : Vec<ast::Module>  = runtime_c_compilations.iter().map(
+        | source_comp |  match compile_source(source_comp, fe.clone())
+        {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("runtime compile error: {}", e);
+                exit(1);
+            }
+
+        }
+    ).collect();
+    
+    let all_modules: Vec<ast::Module> = modules.into_iter().chain(runtime_c_modules).collect();
+    let asm = match Codegen::new(&all_modules).and_then(|cg| cg.generate()) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("codegen error: {}", e);
