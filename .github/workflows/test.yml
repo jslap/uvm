@@ -38,6 +38,9 @@ jobs:
       run: RUST_BACKTRACE=1 cargo test
 
     - name: Test uvclang end-to-end (C -> UVM via front end, differential vs native)
+      env:
+        NATIVE_CC: clang
+        NATIVE_CXX: clang++
       run: |
         clang --version   # fail loudly if the toolchain is missing rather than skipping every test
         ./uvclang/run_tests.sh

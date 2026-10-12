@@ -1441,6 +1441,7 @@ impl Parser
         let base = self.parse_typed_val()?;
         let mut indices = vec![];
         while self.input.match_token(",")? {
+            self.input.match_keyword("inrange")?; // LLVM <= 18: per-index `inrange`
             indices.push(self.parse_typed_val()?);
         }
         self.input.expect_token(")")?;
