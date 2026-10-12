@@ -3,6 +3,7 @@
 #include <uvm/window.h>
 #include <uvm/math.h>
 #include <uvm/graphics.h>
+#include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
