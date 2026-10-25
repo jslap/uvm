@@ -97,7 +97,7 @@ UVCLANG_WEAK int pthread_mutex_lock(pthread_mutex_t* mutex)
         // A failed compare_exchange overwrites `expected` with the value it
         // actually found; reset it so the next attempt again swaps 0 -> 1.
         expected = __PTHREAD_MUTEX_UNLOCKED;
-        thread_sleep(0); // yield to the lock holder / other threads
+        __uvm_thread_sleep(0); // yield to the lock holder / other threads
     }
     return 0;
 }
@@ -227,7 +227,7 @@ UVCLANG_WEAK int pthread_create(pthread_t* thread, const pthread_attr_t* attr, v
     t->stack = (char*)region + __UVCLANG_STACK_HEADER;
     t->start = start;
     t->arg = arg;
-    t->tid = thread_spawn((void*)__uvclang_thread_start, t);
+    t->tid = __uvm_thread_spawn((void*)__uvclang_thread_start, t);
 
     if (thread) {
         *thread = t;
@@ -239,7 +239,7 @@ UVCLANG_WEAK int pthread_create(pthread_t* thread, const pthread_attr_t* attr, v
 // non-NULL, the thread's return value is stored there. Returns 0.
 UVCLANG_WEAK int pthread_join(pthread_t thread, void** retval)
 {
-    uint64_t r = thread_join(thread->tid);
+    uint64_t r = __uvm_thread_join(thread->tid);
     if (retval) {
         *retval = (void*)(uintptr_t)r;
     }
