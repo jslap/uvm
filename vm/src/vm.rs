@@ -951,7 +951,7 @@ impl Thread
 
         // Convert the string to a Rust string
         let char_ptr = self.heap.get_ptr(str_ptr, str_len);
-        let c_str = unsafe { CStr::from_ptr(char_ptr as *const c_char) };
+        let c_str = unsafe { CStr::from_ptr(char_ptr as *const i8) };
         let rust_str = c_str.to_str().unwrap();
         rust_str
     }
