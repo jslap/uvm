@@ -56,6 +56,7 @@ for src in "$TESTS"/*.c "$TESTS"/*.cpp "$TESTS"/multi_file_tests/*/; do
         */)
             # Directory: a multi-file test. Compile every .c/.cpp file inside
             # it together as one test, named after the directory.
+            [ -d "$src" ] || continue
             base=$(basename "$src")
             files=""
             for f in "$src"*.c "$src"*.cpp; do
@@ -97,10 +98,10 @@ for src in "$TESTS"/*.c "$TESTS"/*.cpp "$TESTS"/multi_file_tests/*/; do
                 # it must use the platform libc, not uvclang's UVM-side headers,
                 # so the stdlib headers are genuinely tested differentially.
                 case "$src" in
-                    *.cpp*) native_compiler=("$NATIVE_CXX" -std=c++23) ;;
-                    *)      native_compiler=("$NATIVE_CC") ;;
+                    *.cpp*) native_compiler="$NATIVE_CXX"; native_std="-std=c++23" ;;
+                    *)      native_compiler="$NATIVE_CC";  native_std="" ;;
                 esac
-                if ! "${native_compiler[@]}" "$opt" -w $src -o "$TMP/ref" 2>/dev/null; then
+                if ! "$native_compiler" $native_std "$opt" -w $src -o "$TMP/ref" 2>/dev/null; then
                     echo "SKIP $name (native compile failed)"; skip=$((skip+1)); continue
                 fi
                 ref_out=$("$TMP/ref" 2>/dev/null); ref_code=$?

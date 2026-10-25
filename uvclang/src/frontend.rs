@@ -97,6 +97,25 @@ fn find_clang(is_cpp: bool) -> String
     base.to_string()
 }
 
+/// Resolve the clang binary: honor `$CLANG` (`$CLANGXX` for C++), else prefer
+/// Homebrew LLVM (a common macOS dev setup), else fall back to whatever
+/// `clang`/`clang++` is on PATH (Linux / CI).
+fn find_llvm_link() -> String
+{
+    let (env_var, brew, base) = 
+        ("LLVMLINK", "/opt/homebrew/opt/llvm/bin/llvm-link", "llvm-link");
+
+    if let Ok(c) = std::env::var(env_var) {
+        if !c.is_empty() {
+            return c;
+        }
+    }
+    if Path::new(brew).exists() {
+        return brew.to_string();
+    }
+    base.to_string()
+}
+
 /// Create a Command with the program and the needed options
 fn get_base_compile_cmd(program: &String, opts: &FrontendOpts) -> Command
 {
@@ -191,7 +210,7 @@ pub fn link_to_ir(sources: &Vec<String>) -> Result<NamedTempFile, String>
         .tempfile()
         .map_err(|e| e.to_string())?;
 
-    let llvm_link = "/opt/homebrew/opt/llvm/bin/llvm-link"; // fix this
+    let llvm_link = find_llvm_link();
 
     let mut cmd = Command::new(&llvm_link);
 

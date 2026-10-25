@@ -1605,13 +1605,26 @@ impl Parser
             self.input.eat_ch();
             loop {
                 let c = self.input.peek_ch();
-                if c == '\\' {
-                    let c1 = self.input.eat_ch();
-                    let c2 = self.input.eat_ch();
-                    let hex_str = format!("{c1}{c2}"); 
-                    let ascii_num = u8::from_str_radix(&hex_str, 16)
-                        .map_err(|_| ParseError::new(&self.input, "invalid \\xx escape in quoted identifier"))?;
-                    s.push(ascii_num as char);
+                if c == '\0' {
+                    return self.input.parse_error("unterminated quoted identifier");
+                }
+                else if c == '\\' {
+                    // `\XX` is a byte char as two hex digits.
+                    self.input.eat_ch(); // '\'
+                    if self.input.peek_ch() == '\\' {
+                        self.input.eat_ch();
+                        s.push('\\');
+                    }
+                    else {
+                        let hi = self.input.peek_ch().to_digit(16);
+                        if hi.is_some() { self.input.eat_ch(); }
+                        let lo = self.input.peek_ch().to_digit(16);
+                        if lo.is_some() { self.input.eat_ch(); }
+                        match (hi, lo) {
+                            (Some(hi), Some(lo)) => s.push(((hi << 4) | lo) as u8 as char),
+                            _ => return self.input.parse_error("invalid \\XX escape in quoted identifier"),
+                        }                        
+                    }
                 }
                 else if c == '"' {
                     self.input.eat_ch();
